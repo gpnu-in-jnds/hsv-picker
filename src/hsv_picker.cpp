@@ -202,7 +202,7 @@ void Picker::selectTo(cv::Point point) {
     refreshStatistics();
 }
 
-void Picker::onMouse(int event, int x, int y, int flags) {
+void Picker::onMouse(int event, int x, int y, int /*flags*/) {
     if (frame_.empty()) {
         return;
     }
@@ -216,12 +216,9 @@ void Picker::onMouse(int event, int x, int y, int flags) {
         dragging_ = false;
         reportRequested_ = true;
     } else if (dragging_ && event == cv::EVENT_MOUSEMOVE) {
+        // Keep dragging until an explicit button-up or R cancellation.
+        // Motion-event button flags are not a reliable release notification.
         selectTo(point);
-        // Recover if button-up happened outside the window and was not delivered.
-        if ((flags & cv::EVENT_FLAG_LBUTTON) == 0) {
-            dragging_ = false;
-            reportRequested_ = true;
-        }
     }
 }
 

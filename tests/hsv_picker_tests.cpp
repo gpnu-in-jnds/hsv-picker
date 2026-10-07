@@ -121,6 +121,19 @@ void testPicker(const std::string& previewPath) {
     const auto last = display.tl() + cv::Point(80, 80);
     picker.onMouse(cv::EVENT_LBUTTONDOWN, first.x, first.y, cv::EVENT_FLAG_LBUTTON);
     require(picker.frozen() && picker.statistics(), "Drag freezes camera and starts analysis");
+    // A backend may send motion events without the left-button flag while held.
+    // Only an explicit release or cancellation should finish the selection.
+    int previousWidth = picker.selection().width;
+    for (int step = 1; step <= 16; ++step) {
+        const int flags = step % 3 == 0 ? cv::EVENT_FLAG_SHIFTKEY :
+                          step % 3 == 1 ? 0 : cv::EVENT_FLAG_CTRLKEY;
+        picker.onMouse(cv::EVENT_MOUSEMOVE, first.x + step * 4, first.y + step * 4, flags);
+        require(picker.frozen() && !picker.takeReportRequest(),
+                "Motion without a left-button flag must not end dragging");
+        require(picker.selection().width > previousWidth,
+                "Continuous motion keeps growing the selection");
+        previousWidth = picker.selection().width;
+    }
     picker.onMouse(cv::EVENT_MOUSEMOVE, last.x, last.y, cv::EVENT_FLAG_LBUTTON);
     const auto duringDrag = picker.selection();
     require(duringDrag.width > 1 && duringDrag.height > 1, "Stats update while dragging");
@@ -131,6 +144,9 @@ void testPicker(const std::string& previewPath) {
     require(picker.statistics()->range == std::array<int, 6>{60, 60, 255, 255, 255, 255},
             "ROI stats sample original image");
     require(picker.takeReportRequest() && !picker.takeReportRequest(), "Release prints once");
+    picker.onMouse(cv::EVENT_MOUSEMOVE, last.x + 10, last.y + 10, cv::EVENT_FLAG_LBUTTON);
+    require(picker.selection() == duringDrag && !picker.frozen() && !picker.takeReportRequest(),
+            "Motion after release cannot reopen or change the completed selection");
     picker.onKey('p');
     require(picker.takeReportRequest(), "P requests bounds output");
     cv::Mat nextFrame(image.size(), CV_8UC3, cv::Scalar(0, 0, 255));
@@ -165,8 +181,11 @@ void testPicker(const std::string& previewPath) {
     const auto end = display.br() - cv::Point(1, 1);
     picker.onMouse(cv::EVENT_LBUTTONDOWN, end.x, end.y, cv::EVENT_FLAG_LBUTTON);
     picker.onMouse(cv::EVENT_MOUSEMOVE, -100, -100, 0);
-    require(picker.selection() == cv::Rect(0, 0, 200, 120) && picker.takeReportRequest() && !picker.frozen(),
-            "Lost button-up ends drag, resumes capture, and clamps reverse selection");
+    require(picker.selection() == cv::Rect(0, 0, 200, 120) && !picker.takeReportRequest() && picker.frozen(),
+            "Out-of-image motion is clamped and continues the active drag");
+    picker.onMouse(cv::EVENT_LBUTTONUP, -100, -100, 0);
+    require(picker.takeReportRequest() && !picker.frozen(),
+            "Explicit release ends an out-of-image drag and resumes capture");
     require(!picker.onKey('q') && !picker.onKey(27), "Q and Escape exit");
     picker.setFrame(cv::Mat(20, 30, CV_8UC3, cv::Scalar(0, 0, 0)));
     require(!picker.statistics(), "Resolution change clears old selection");
