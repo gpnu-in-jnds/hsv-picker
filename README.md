@@ -74,8 +74,12 @@ H 范围会很宽。根据直方图在两端分别设置范围，再把两个 `i
 OpenCV 的 GUI 后端必须可用；可选择 GTK、Qt 或原生 Wayland，XFCE 下通常使用 X11。
 参见 [OpenCV HighGUI 文档](https://docs.opencv.org/4.x/d7/dfc/group__highgui.html)。
 
-原生 Wayland 后端不支持 `getWindowProperty`；本工具检测到该后端时跳过窗口可见性
-查询，请用 `Q` / `Esc` 退出。GTK/Qt 后端同时支持窗口关闭按钮退出。
+部分 OpenCV 4 的 GTK 后端不支持 `WND_PROP_VISIBLE`，会返回 `-1`。
+本工具将其视为属性不支持，改用 `WND_PROP_AUTOSIZE` 判断窗口是否仍存在，避免
+误判关闭导致启动后立即退出。参见 [OpenCV GTK 属性兼容问题](https://github.com/opencv/opencv/issues/25346)。
+原生 Wayland 后端不支持 `getWindowProperty`；本工具检测到该后端时跳过窗口属性
+查询。其他后端若也不支持属性查询，则使用 `Q` / `Esc` 退出；支持查询的 GTK/Qt
+后端同时支持窗口关闭按钮退出。
 如果 GNOME 下 Qt 后端无法加载 Wayland 插件，可在支持 XWayland 的会话中运行：
 
 ```sh
@@ -84,6 +88,18 @@ QT_QPA_PLATFORM=xcb ./build/hsv-picker --source ./photo.png
 
 无法打开摄像头、读取图片或摄像头断流时，程序向标准错误输出原因并以非零状态退出。
 摄像头访问权限由系统设备权限决定。
+
+如果目标机器仍然启动失败，请在它的桌面终端内运行并保留完整输出：
+
+```sh
+./build/hsv-picker
+echo "exit code: $?"
+```
+
+程序会先输出 OpenCV 版本和输入路径；较新 OpenCV 还会输出 HighGUI 后端名称。
+如果终端提示 GUI 功能未实现，需要使用启用了 GTK 或 Qt 的 OpenCV；如果提示
+无法连接显示服务，请检查当前桌面会话的 `DISPLAY`。目标机器需要针对其 OpenCV 4
+重新构建，避免使用本地链接 OpenCV 5 的二进制。
 
 ## 测试
 

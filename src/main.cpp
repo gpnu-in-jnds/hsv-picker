@@ -3,6 +3,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/videoio.hpp>
+#include <opencv2/core/version.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -30,17 +31,49 @@ void printSelection(const hsvpicker::Picker& picker) {
               << "cv::inRange(hsv, lower, upper, mask);\n" << std::flush;
 }
 
-bool windowIsOpen(bool checkVisibility) {
-    if (!checkVisibility) {
-        return true;
+class WindowMonitor {
+public:
+    explicit WindowMonitor(bool checkProperties) : checkProperties_(checkProperties) {}
+
+    bool isOpen() {
+        if (!checkProperties_) {
+            return true;
+        }
+        try {
+            const double visible = cv::getWindowProperty(windowName, cv::WND_PROP_VISIBLE);
+            if (visible >= 0) {
+                visibilitySupported_ = true;
+                return visible > 0;
+            }
+            if (visibilitySupported_) {
+                return false;
+            }
+        } catch (const cv::Exception&) {
+            if (visibilitySupported_) {
+                return false;
+            }
+        }
+
+        // Older GTK backends always return -1 for VISIBLE. AUTOSIZE is 0/1
+        // while the window exists, then -1 (or an exception) after closing it.
+        // Only infer closure after the property was confirmed to work once.
+        try {
+            const double autosize = cv::getWindowProperty(windowName, cv::WND_PROP_AUTOSIZE);
+            if (autosize >= 0) {
+                autosizeSupported_ = true;
+                return true;
+            }
+        } catch (const cv::Exception&) {
+            // An unsupported property must not terminate the application.
+        }
+        return !autosizeSupported_;
     }
-    try {
-        return cv::getWindowProperty(windowName, cv::WND_PROP_VISIBLE) >= 1;
-    } catch (const cv::Exception&) {
-        // GTK/Qt can throw once their window has been destroyed.
-        return false;
-    }
-}
+
+private:
+    bool checkProperties_;
+    bool visibilitySupported_ = false;
+    bool autosizeSupported_ = false;
+};
 } // namespace
 
 int main(int argc, char** argv) {
@@ -62,6 +95,8 @@ int main(int argc, char** argv) {
             return EXIT_SUCCESS;
         }
 
+        std::cout << "OpenCV: " << CV_VERSION << '\n'
+                  << "Source: " << options.source << '\n' << std::flush;
         const bool camera = hsvpicker::isCameraSource(options.source);
         cv::VideoCapture capture;
         cv::Mat frame;
@@ -91,19 +126,21 @@ int main(int argc, char** argv) {
         // does not replace it with its small default window dimensions.
         cv::resizeWindow(windowName, 1440, 880);
         cv::setMouseCallback(windowName, mouseCallback, &picker);
-        bool checkVisibility = true;
+        bool checkProperties = true;
 #ifdef HSV_HAS_UI_FRAMEWORK
         // The native Wayland backend does not implement getWindowProperty.
-        checkVisibility = cv::currentUIFramework() != "WAYLAND";
+        const auto backend = cv::currentUIFramework();
+        checkProperties = backend != "WAYLAND";
+        std::cout << "HighGUI backend: " << backend << '\n';
 #endif
-        std::cout << "Source: " << options.source << '\n'
-                  << "Drag left mouse to select. Camera freezes during dragging and resumes on release.\n"
+        WindowMonitor windowMonitor(checkProperties);
+        std::cout << "Drag left mouse to select. Camera freezes during dragging and resumes on release.\n"
                   << "Bounds use H 0..179 and S/V 0..255; release the mouse or press P to print.\n"
                   << std::flush;
         while (true) {
             cv::imshow(windowName, picker.render());
             const int key = cv::waitKey(20);
-            if (!windowIsOpen(checkVisibility) || !picker.onKey(key < 0 ? key : key & 0xff)) {
+            if (!windowMonitor.isOpen() || !picker.onKey(key < 0 ? key : key & 0xff)) {
                 break;
             }
             if (picker.takeReportRequest()) {
